@@ -31,7 +31,7 @@ API_DOMAIN = os.getenv("HUBSPOT_API_DOMAIN")
 #Required URLs
 authorization_url = f'{AUTHORIZATION_DOMAIN}?client_id={CLIENT_ID}&redirect_uri={REDIRECT_URI}'
 access_token_url = f'{API_DOMAIN}/oauth/v1/token'
-get_items_hubspot_url = f'{API_DOMAIN}/crm/v3/objects/0-2'
+get_items_hubspot_url = f'{API_DOMAIN}/crm/v3/objects/0-2' #company id
 
 #Initial authorization for Hubspot 
 async def authorize_hubspot(user_id, org_id):
@@ -52,7 +52,6 @@ async def oauth2callback_hubspot(request: Request):
         raise HTTPException(status_code=400, detail=request.query_params.get('error'))
     code = request.query_params.get('code')
     encoded_state = request.query_params.get('state').replace('\\\"', '"').replace('+','')
-    # return encoded_state
     state_data = json.loads(encoded_state)
 
     original_state = state_data.get('state')
@@ -100,10 +99,6 @@ async def oauth2callback_hubspot(request: Request):
     """
     return HTMLResponse(content=close_window_script)
 
-#check if access token is expired
-def is_token_expired(expires_in):
-    return time.time() >= expires_in
-
 #get hubspot credentials
 async def get_hubspot_credentials(user_id, org_id):
     credentials = await get_value_redis(f'hubspot_credentials:{org_id}:{user_id}')
@@ -114,6 +109,25 @@ async def get_hubspot_credentials(user_id, org_id):
         raise HTTPException(status_code=400, detail='No credentials found.')
     await delete_key_redis(f'hubspot_credentials:{org_id}:{user_id}')
 
+    return credentials
+
+#check if access token is expired
+def is_token_expired(expires_in):
+    return time.time() >= expires_in
+
+#refresh access token if expired
+async def refresh_access_token(credentials):
+    data = {
+        'grant_type': 'refresh_token',
+        'client_id': CLIENT_ID,
+        'client_secret': CLIENT_SECRET,
+        'refresh_token': credentials['refresh_token']
+    }
+
+    #REFERENCE : https://developers.hubspot.com/docs/guides/apps/authentication/oauth-quickstart-guide#refreshing-oauth-2.0-tokens
+    response = requests.post(access_token_url, data)
+    credentials = response.json()
+    credentials['expires_in'] = time.time() + credentials['expires_in']
     return credentials
 
 #create integration item
@@ -132,21 +146,6 @@ def create_integration_item_metadata_object(result):
     )
 
     return integration_item_metadata
-
-#refresh access token if expired
-async def refresh_access_token(credentials):
-    data = {
-        'grant_type': 'refresh_token',
-        'client_id': CLIENT_ID,
-        'client_secret': CLIENT_SECRET,
-        'refresh_token': credentials['refresh_token']
-    }
-
-    #REFERENCE : https://developers.hubspot.com/docs/guides/apps/authentication/oauth-quickstart-guide#refreshing-oauth-2.0-tokens
-    response = requests.post(access_token_url, data)
-    credentials = response.json()
-    access_token_expiration_time = time.time() + credentials['expires_in']
-    return credentials
 
 #get items from hubspot
 async def get_items_hubspot(credentials):
