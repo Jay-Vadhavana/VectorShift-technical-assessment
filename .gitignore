@@ -1,0 +1,6 @@
+__pycache__
+.env
+node_modules
+dump.rdb
+*.pdf
+.DS_store
